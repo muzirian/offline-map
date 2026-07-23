@@ -27,9 +27,12 @@ import androidx.core.content.ContextCompat
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import com.offlines.download.MapDownloader
 import com.offlines.server.MapServer
 import com.offlines.server.MapServerService
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,6 +48,11 @@ fun ServerScreen(downloader: MapDownloader, visible: Boolean) {
     var comapsApkDownloaded by remember { mutableStateOf(downloader.isComapsApkDownloaded()) }
     var comapsApkDownloading by remember { mutableStateOf(false) }
     var comapsApkProgress by remember { mutableStateOf(0f) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var updateAvailable by remember { mutableStateOf(false) }
+    var latestVersionCode by remember { mutableStateOf<Int?>(null) }
+    var upToDate by remember { mutableStateOf(false) }
+    var updateCheckError by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -159,77 +167,171 @@ fun ServerScreen(downloader: MapDownloader, visible: Boolean) {
                 Spacer(Modifier.height(8.dp))
                 Card {
                     Column(Modifier.padding(12.dp)) {
-                        Text("CoMaps APK", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(4.dp))
-                        if (comapsApkDownloading) {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().height(24.dp).clipToBounds()
-                            ) {
-                                Box(
-                                    modifier = Modifier.fillMaxHeight()
-                                        .fillMaxWidth(comapsApkProgress.coerceIn(0f, 1f))
-                                        .background(MaterialTheme.colorScheme.primaryContainer)
-                                )
-                                Text(
-                                    "Downloading ${(comapsApkProgress * 100).toInt()}%",
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        } else if (comapsApkDownloaded && isRunning) {
-                            ipAddresses.forEach { ip ->
-                                val apkUrl = "http://$ip:$serverPort/$comapsApkFileName"
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            apkUrl,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("CoMaps APK", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            IconButton(onClick = {
+                                scope.launch {
+                                    checkingUpdate = true
+                                    updateAvailable = false
+                                    upToDate = false
+                                    updateCheckError = false
+                                    try {
+                                        val (vc, _) = downloader.fetchLatestApkInfo()
+                                        val cur = downloader.getCurrentApkVersion()
+                                        if (cur == null || vc > cur) {
+                                            latestVersionCode = vc
+                                            updateAvailable = true
+                                        } else {
+                                            upToDate = true
+                                            delay(3000)
+                                            upToDate = false
+                                        }
+                                    } catch (_: Exception) {
+                                        updateCheckError = true
+                                        delay(3000)
+                                        updateCheckError = false
                                     }
-                                    Spacer(Modifier.width(8.dp))
-                                    QrCodeImage(apkUrl, size = 80.dp)
+                                    checkingUpdate = false
                                 }
-                                Spacer(Modifier.height(4.dp))
+                            }) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Check for updates")
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        val currentVersion = downloader.getCurrentApkVersion()
+                        if (currentVersion != null) {
+                            Text(
+                                "v$currentVersion",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
+                        when {
+                            comapsApkDownloading -> {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().height(24.dp).clipToBounds()
+                                ) {
+                                    Box(
+                                        modifier = Modifier.fillMaxHeight()
+                                            .fillMaxWidth(comapsApkProgress.coerceIn(0f, 1f))
+                                            .background(MaterialTheme.colorScheme.primaryContainer)
+                                    )
+                                    Text(
+                                        "Downloading ${(comapsApkProgress * 100).toInt()}%",
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                            checkingUpdate -> {
                                 Text(
-                                    "Open this URL on your phone to download CoMaps",
+                                    "Checking for updates...",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                        } else if (comapsApkDownloaded) {
-                            Text(
-                                "APK ready. Start the server to get the download URL.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            Text(
-                                "Download CoMaps APK so other phones can install it from this server (no internet needed on their side).",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Button(
-                                onClick = {
+                            updateAvailable -> {
+                                Text(
+                                    "Update v$latestVersionCode available",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Button(onClick = {
                                     scope.launch {
                                         comapsApkDownloading = true
                                         comapsApkProgress = 0f
                                         try {
-                                            downloader.downloadCoMapsApk { p ->
+                                            downloader.downloadCoMapsApk({ p ->
                                                 comapsApkProgress = p
-                                            }
+                                            }, forceRefresh = true)
                                             comapsApkDownloaded = true
+                                            updateAvailable = false
+                                            latestVersionCode = null
                                         } catch (_: Exception) {
                                         }
                                         comapsApkDownloading = false
                                     }
+                                }) {
+                                    Text("Download Update")
                                 }
-                            ) {
-                                Text("Download CoMaps APK (63 MB)")
+                            }
+                            upToDate -> {
+                                Text(
+                                    "Up to date",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            updateCheckError -> {
+                                Text(
+                                    "Update check failed",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            comapsApkDownloaded && isRunning -> {
+                                ipAddresses.forEach { ip ->
+                                    val apkUrl = "http://$ip:$serverPort/$comapsApkFileName"
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                apkUrl,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        QrCodeImage(apkUrl, size = 80.dp)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Open this URL on your phone to download CoMaps",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            comapsApkDownloaded -> {
+                                Text(
+                                    "APK ready. Start the server to get the download URL.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            else -> {
+                                Text(
+                                    "Download CoMaps APK so other phones can install it from this server (no internet needed on their side).",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        scope.launch {
+                                            comapsApkDownloading = true
+                                            comapsApkProgress = 0f
+                                            try {
+                                                downloader.downloadCoMapsApk(onProgress = { p ->
+                                                    comapsApkProgress = p
+                                                })
+                                                comapsApkDownloaded = true
+                                            } catch (_: Exception) {
+                                            }
+                                            comapsApkDownloading = false
+                                        }
+                                    }
+                                ) {
+                                    Text("Download CoMaps APK (63 MB)")
+                                }
                             }
                         }
                     }
