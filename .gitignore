@@ -1,0 +1,14 @@
+*.apk
+*.tar.gz
+*.png
+*.svg
+logs/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/gradle/wrapper/gradle-wrapper.jar
+android/log*.txt
+.gradle/
+build/
+local.properties
