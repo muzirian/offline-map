@@ -20,7 +20,9 @@ class MapDownloader(private val storageDir: File) {
         .build()
 
     companion object {
-        const val COMAPS_APK_URL = "https://f-droid.org/repo/app.comaps.fdroid_26071610.apk"
+        const val FDROID_API_URL = "https://f-droid.org/api/v1/packages/app.comaps.fdroid"
+        const val FDROID_APK_BASE = "https://f-droid.org/repo"
+        const val COMAPS_APK_URL = "$FDROID_APK_BASE/app.comaps.fdroid_26071610.apk"
         const val COMAPS_APK_FILENAME = "comaps.apk"
     }
 
@@ -160,6 +162,23 @@ class MapDownloader(private val storageDir: File) {
 
     fun getStorageDir(): File = storageDir
 
+    private var cachedApkUrl: String? = null
+
+    suspend fun getLatestApkUrl(): String = withContext(Dispatchers.IO) {
+        cachedApkUrl?.let { return@withContext it }
+        try {
+            val text = fetchString(FDROID_API_URL)
+            val json = gson.fromJson(text, JsonElement::class.java).asJsonObject
+            val versionCode = json.get("suggestedVersionCode").asInt
+            val url = "$FDROID_APK_BASE/app.comaps.fdroid_$versionCode.apk"
+            cachedApkUrl = url
+            url
+        } catch (e: Exception) {
+            cachedApkUrl = COMAPS_APK_URL
+            COMAPS_APK_URL
+        }
+    }
+
     fun comapsApkFile(): File = File(storageDir, COMAPS_APK_FILENAME)
 
     fun isComapsApkDownloaded(): Boolean = comapsApkFile().exists()
@@ -167,8 +186,9 @@ class MapDownloader(private val storageDir: File) {
     suspend fun downloadCoMapsApk(onProgress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
         val output = comapsApkFile()
         if (output.exists()) return@withContext output
+        val url = getLatestApkUrl()
         val request = Request.Builder()
-            .url(COMAPS_APK_URL)
+            .url(url)
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36")
             .header("Accept", "application/octet-stream,*/*")
             .build()
