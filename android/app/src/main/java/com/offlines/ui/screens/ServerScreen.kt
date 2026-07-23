@@ -51,8 +51,11 @@ fun ServerScreen(downloader: MapDownloader, visible: Boolean) {
     var checkingUpdate by remember { mutableStateOf(false) }
     var updateAvailable by remember { mutableStateOf(false) }
     var latestVersionCode by remember { mutableStateOf<Int?>(null) }
+    var latestApkUrl by remember { mutableStateOf<String?>(null) }
     var upToDate by remember { mutableStateOf(false) }
     var updateCheckError by remember { mutableStateOf(false) }
+    var refreshDone by remember { mutableStateOf(false) }
+    var isLatest by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -179,13 +182,16 @@ fun ServerScreen(downloader: MapDownloader, visible: Boolean) {
                                     updateAvailable = false
                                     upToDate = false
                                     updateCheckError = false
+                                    isLatest = false
                                     try {
-                                        val (vc, _) = downloader.fetchLatestApkInfo()
+                                        val (vc, url) = downloader.fetchLatestApkInfo()
                                         val cur = downloader.getCurrentApkVersion()
                                         if (cur == null || vc > cur) {
                                             latestVersionCode = vc
+                                            latestApkUrl = url
                                             updateAvailable = true
                                         } else {
+                                            isLatest = true
                                             upToDate = true
                                             delay(3000)
                                             upToDate = false
@@ -196,6 +202,7 @@ fun ServerScreen(downloader: MapDownloader, visible: Boolean) {
                                         updateCheckError = false
                                     }
                                     checkingUpdate = false
+                                    refreshDone = true
                                 }
                             }) {
                                 Icon(Icons.Default.Refresh, contentDescription = "Check for updates")
@@ -204,11 +211,22 @@ fun ServerScreen(downloader: MapDownloader, visible: Boolean) {
                         Spacer(Modifier.height(4.dp))
                         val currentVersion = downloader.getCurrentApkVersion()
                         if (currentVersion != null) {
-                            Text(
-                                "v$currentVersion",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "v$currentVersion",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (isLatest) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "latest",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                             Spacer(Modifier.height(4.dp))
                         }
                         when {
@@ -247,12 +265,16 @@ fun ServerScreen(downloader: MapDownloader, visible: Boolean) {
                                         comapsApkDownloading = true
                                         comapsApkProgress = 0f
                                         try {
-                                            downloader.downloadCoMapsApk({ p ->
-                                                comapsApkProgress = p
-                                            }, forceRefresh = true)
+                                            downloader.downloadCoMapsApk(
+                                                onProgress = { p ->
+                                                    comapsApkProgress = p
+                                                },
+                                                apkUrl = latestApkUrl!!,
+                                                versionCode = latestVersionCode!!,
+                                                forceRefresh = true
+                                            )
                                             comapsApkDownloaded = true
                                             updateAvailable = false
-                                            latestVersionCode = null
                                         } catch (_: Exception) {
                                         }
                                         comapsApkDownloading = false
@@ -275,22 +297,27 @@ fun ServerScreen(downloader: MapDownloader, visible: Boolean) {
                                     color = MaterialTheme.colorScheme.error
                                 )
                             }
-                            comapsApkDownloaded && isRunning -> {
+                            !refreshDone && !comapsApkDownloaded -> {
+                                Text(
+                                    "Tap Refresh to fetch the latest version",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            !refreshDone && comapsApkDownloaded && isRunning -> {
                                 ipAddresses.forEach { ip ->
-                                    val apkUrl = "http://$ip:$serverPort/$comapsApkFileName"
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
+                                    val url = "http://$ip:$serverPort/$comapsApkFileName"
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
                                             Text(
-                                                apkUrl,
+                                                url,
                                                 style = MaterialTheme.typography.bodyLarge,
                                                 fontFamily = FontFamily.Monospace,
                                                 color = MaterialTheme.colorScheme.primary
                                             )
                                         }
                                         Spacer(Modifier.width(8.dp))
-                                        QrCodeImage(apkUrl, size = 80.dp)
+                                        QrCodeImage(url, size = 80.dp)
                                     }
                                     Spacer(Modifier.height(4.dp))
                                     Text(
@@ -300,38 +327,70 @@ fun ServerScreen(downloader: MapDownloader, visible: Boolean) {
                                     )
                                 }
                             }
-                            comapsApkDownloaded -> {
+                            !refreshDone && comapsApkDownloaded -> {
                                 Text(
                                     "APK ready. Start the server to get the download URL.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            else -> {
+                            !comapsApkDownloaded -> {
                                 Text(
-                                    "Download CoMaps APK so other phones can install it from this server (no internet needed on their side).",
+                                    "v$latestVersionCode ready to download",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(Modifier.height(8.dp))
-                                Button(
-                                    onClick = {
-                                        scope.launch {
-                                            comapsApkDownloading = true
-                                            comapsApkProgress = 0f
-                                            try {
-                                                downloader.downloadCoMapsApk(onProgress = { p ->
+                                Button(onClick = {
+                                    scope.launch {
+                                        comapsApkDownloading = true
+                                        comapsApkProgress = 0f
+                                        try {
+                                            downloader.downloadCoMapsApk(
+                                                onProgress = { p ->
                                                     comapsApkProgress = p
-                                                })
-                                                comapsApkDownloaded = true
-                                            } catch (_: Exception) {
-                                            }
-                                            comapsApkDownloading = false
+                                                },
+                                                apkUrl = latestApkUrl!!,
+                                                versionCode = latestVersionCode!!
+                                            )
+                                            comapsApkDownloaded = true
+                                        } catch (_: Exception) {
                                         }
+                                        comapsApkDownloading = false
                                     }
-                                ) {
-                                    Text("Download CoMaps APK (63 MB)")
+                                }) {
+                                    Text("Download v$latestVersionCode")
                                 }
+                            }
+                            isRunning -> {
+                                ipAddresses.forEach { ip ->
+                                    val url = "http://$ip:$serverPort/$comapsApkFileName"
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                url,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        QrCodeImage(url, size = 80.dp)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Open this URL on your phone to download CoMaps",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            else -> {
+                                Text(
+                                    "APK ready. Start the server to get the download URL.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }

@@ -22,7 +22,6 @@ class MapDownloader(private val storageDir: File) {
     companion object {
         const val FDROID_API_URL = "https://f-droid.org/api/v1/packages/app.comaps.fdroid"
         const val FDROID_APK_BASE = "https://f-droid.org/repo"
-        const val COMAPS_APK_URL = "$FDROID_APK_BASE/app.comaps.fdroid_26071610.apk"
         const val COMAPS_APK_FILENAME = "comaps.apk"
         const val COMAPS_VERSION_FILENAME = "comaps_version.txt"
     }
@@ -179,6 +178,7 @@ class MapDownloader(private val storageDir: File) {
         val request = Request.Builder()
             .url(FDROID_API_URL)
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36")
+            .header("Accept", "application/json")
             .build()
         val response = client.newCall(request).execute()
         try {
@@ -192,12 +192,16 @@ class MapDownloader(private val storageDir: File) {
         }
     }
 
-    suspend fun downloadCoMapsApk(onProgress: (Float) -> Unit, forceRefresh: Boolean = false): File = withContext(Dispatchers.IO) {
+    suspend fun downloadCoMapsApk(
+        onProgress: (Float) -> Unit,
+        apkUrl: String,
+        versionCode: Int,
+        forceRefresh: Boolean = false
+    ): File = withContext(Dispatchers.IO) {
         val output = comapsApkFile()
         if (!forceRefresh && output.exists()) return@withContext output
-        val (versionCode, url) = fetchLatestApkInfo()
         val request = Request.Builder()
-            .url(url)
+            .url(apkUrl)
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36")
             .header("Accept", "application/octet-stream,*/*")
             .build()
@@ -207,7 +211,7 @@ class MapDownloader(private val storageDir: File) {
             val total = body.contentLength()
             val part = File(storageDir, "$COMAPS_APK_FILENAME.part")
             FileOutputStream(part).use { stream ->
-                val buffer = ByteArray(65536)
+                val buffer = ByteArray(262144)
                 var downloaded = 0L
                 body.byteStream().use { input ->
                     var read: Int
