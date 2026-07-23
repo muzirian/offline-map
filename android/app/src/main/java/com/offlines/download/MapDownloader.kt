@@ -176,11 +176,20 @@ class MapDownloader(private val storageDir: File) {
     fun isComapsApkDownloaded(): Boolean = comapsApkFile().exists()
 
     suspend fun fetchLatestApkInfo(): Pair<Int, String> = withContext(Dispatchers.IO) {
-        val text = fetchString(FDROID_API_URL)
-        val json = gson.fromJson(text, JsonElement::class.java).asJsonObject
-        val versionCode = json.get("suggestedVersionCode").asInt
-        val url = "$FDROID_APK_BASE/app.comaps.fdroid_$versionCode.apk"
-        Pair(versionCode, url)
+        val request = Request.Builder()
+            .url(FDROID_API_URL)
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36")
+            .build()
+        val response = client.newCall(request).execute()
+        try {
+            val text = response.body?.string() ?: throw RuntimeException("Empty response from $FDROID_API_URL")
+            val json = gson.fromJson(text, JsonElement::class.java).asJsonObject
+            val versionCode = json.get("suggestedVersionCode").asInt
+            val url = "$FDROID_APK_BASE/app.comaps.fdroid_$versionCode.apk"
+            Pair(versionCode, url)
+        } finally {
+            response.close()
+        }
     }
 
     suspend fun downloadCoMapsApk(onProgress: (Float) -> Unit, forceRefresh: Boolean = false): File = withContext(Dispatchers.IO) {
