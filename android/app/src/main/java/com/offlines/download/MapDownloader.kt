@@ -44,14 +44,36 @@ class MapDownloader(private val storageDir: File) {
         } catch (_: Exception) { emptyList() }
     }
 
-    private fun mirrorToStaleVersions(series: MapSeries, relativePath: String) {
-        val source = File(storageDir, "maps/${series.name}/${series.version}/$relativePath")
-        if (!source.exists()) return
-        val versions = getStaleVersions(series.name)
-        for (v in versions) {
-            val dest = File(storageDir, "maps/${series.name}/$v/$relativePath")
-            dest.parentFile.mkdirs()
-            source.copyTo(dest, overwrite = true)
+    private suspend fun downloadForVersion(
+        seriesName: String, version: Int, relativePath: String,
+        baseUrl: String, onProgress: ((Float) -> Unit)? = null
+    ) {
+        val base = baseUrl.trimEnd('/')
+        val dir = File(storageDir, "maps/$seriesName/$version").also { it.mkdirs() }
+        val file = File(dir, relativePath)
+        if (file.exists()) return
+        val url = "$base/maps/$seriesName/$version/$relativePath"
+        val request = Request.Builder().url(url).build()
+        val response = client.newCall(request).execute()
+        try {
+            val body = response.body ?: throw RuntimeException("Empty body")
+            val total = body.contentLength()
+            val part = File(dir, "$relativePath.part")
+            FileOutputStream(part).use { stream ->
+                val buffer = ByteArray(8192)
+                var downloaded = 0L
+                body.byteStream().use { input ->
+                    var read: Int
+                    while (input.read(buffer).also { read = it } != -1) {
+                        stream.write(buffer, 0, read)
+                        downloaded += read
+                        if (total > 0 && onProgress != null) onProgress((downloaded.toFloat() / total).coerceIn(0f, 1f))
+                    }
+                }
+            }
+            part.renameTo(file)
+        } finally {
+            response.close()
         }
     }
 
@@ -116,7 +138,14 @@ class MapDownloader(private val storageDir: File) {
             val url = "$base/maps/${series.name}/${series.version}/$fname"
             val bytes = fetchBytes(url)
             File(mapDir, fname).writeBytes(bytes)
-            mirrorToStaleVersions(series, fname)
+        }
+
+        val staleVersions = getStaleVersions(series.name)
+        for (v in staleVersions) {
+            val staleBase = getBestServer(v)
+            for (fname in listOf("countries.txt", "countries.txt.sig")) {
+                downloadForVersion(series.name, v, fname, staleBase)
+            }
         }
     }
 
@@ -151,10 +180,16 @@ class MapDownloader(private val storageDir: File) {
                 }
             }
             part.renameTo(output)
-            mirrorToStaleVersions(series, "${mapFile.id}.mwm")
         } finally {
             response.close()
         }
+
+        val staleVersions = getStaleVersions(series.name)
+        for (v in staleVersions) {
+            val staleBase = getBestServer(v)
+            downloadForVersion(series.name, v, "${mapFile.id}.mwm", staleBase)
+        }
+
         output
     }
 
