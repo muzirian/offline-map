@@ -33,6 +33,28 @@ class MapDownloader(private val storageDir: File) {
     private var cachedCountries: MutableMap<Int, List<MapFile>> = mutableMapOf()
     private var cachedServers: MutableMap<Int, String> = mutableMapOf()
 
+    private fun getStaleVersions(seriesName: String): List<Int> {
+        return try {
+            val f = File(storageDir, "maps.json")
+            if (!f.exists()) return emptyList()
+            val json = gson.fromJson(f.readText(), JsonElement::class.java)
+            val obj = json.asJsonObject.getAsJsonObject("map-series")?.getAsJsonObject(seriesName) ?: return emptyList()
+            val stale = obj.getAsJsonArray("stale") ?: return emptyList()
+            stale.map { it.asInt }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    private fun mirrorToStaleVersions(series: MapSeries, relativePath: String) {
+        val source = File(storageDir, "maps/${series.name}/${series.version}/$relativePath")
+        if (!source.exists()) return
+        val versions = getStaleVersions(series.name)
+        for (v in versions) {
+            val dest = File(storageDir, "maps/${series.name}/$v/$relativePath")
+            dest.parentFile.mkdirs()
+            source.copyTo(dest, overwrite = true)
+        }
+    }
+
     suspend fun fetchMapSeries(): List<MapSeries> = withContext(Dispatchers.IO) {
         cachedSeries?.let { return@withContext it }
         val text = fetchString("$cdnBase/meta/maps.json")
@@ -94,6 +116,7 @@ class MapDownloader(private val storageDir: File) {
             val url = "$base/maps/${series.name}/${series.version}/$fname"
             val bytes = fetchBytes(url)
             File(mapDir, fname).writeBytes(bytes)
+            mirrorToStaleVersions(series, fname)
         }
     }
 
@@ -128,6 +151,7 @@ class MapDownloader(private val storageDir: File) {
                 }
             }
             part.renameTo(output)
+            mirrorToStaleVersions(series, "${mapFile.id}.mwm")
         } finally {
             response.close()
         }
